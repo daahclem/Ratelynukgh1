@@ -626,65 +626,263 @@ async function handleNala(page, source) {
     timeout: 60000,
   });
 
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(6000);
 
-  await page.getByRole("button", { name: "Select currency" }).first().click({
+  await page
+    .getByRole("button", { name: /Accept/i })
+    .click({ timeout: 4000 })
+    .catch(() => {});
+
+  await page.keyboard.press("Escape").catch(() => {});
+
+  const currencyButtons = page.getByRole(
+    "button",
+    { name: "Select currency" }
+  );
+
+  /*
+   * Select sending currency: GBP.
+   */
+  const sendingButton = currencyButtons.first();
+
+  await sendingButton.waitFor({
+    state: "visible",
+    timeout: 20000,
+  });
+
+  await sendingButton.click({
+    force: true,
     timeout: 15000,
   });
 
-  await page.locator("#currency-listbox-dropdown-1").getByText("GBP").click({
-    timeout: 10000,
+  await page.waitForTimeout(1200);
+
+  let gbpSelected = false;
+
+  const gbpCandidates = [
+    page.getByRole("option", {
+      name: /British Pound\s+GBP/i,
+    }),
+
+    page.getByRole("option", {
+      name: /\bGBP\b/i,
+    }),
+
+    page.locator('[role="option"]:visible').filter({
+      hasText: /\bGBP\b/,
+    }),
+
+    page.getByText("GBP", {
+      exact: true,
+    }),
+  ];
+
+  for (const locator of gbpCandidates) {
+    try {
+      const count = await locator.count();
+
+      for (let index = 0; index < count; index++) {
+        const candidate = locator.nth(index);
+
+        if (
+          await candidate
+            .isVisible({ timeout: 2000 })
+            .catch(() => false)
+        ) {
+          await candidate.click({
+            force: true,
+            timeout: 8000,
+          });
+
+          gbpSelected = true;
+          break;
+        }
+      }
+
+      if (gbpSelected) break;
+    } catch (_) {}
+  }
+
+  /*
+   * Keyboard fallback if the options are rendered without a
+   * stable role or text locator.
+   */
+  if (!gbpSelected) {
+    await page.keyboard.type("GBP", {
+      delay: 100,
+    });
+
+    await page.waitForTimeout(800);
+
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+
+    gbpSelected = true;
+  }
+
+  await page.waitForTimeout(1500);
+
+  /*
+   * Select receiving currency: GHS.
+   */
+  const receivingButton = currencyButtons.nth(1);
+
+  await receivingButton.waitFor({
+    state: "visible",
+    timeout: 20000,
+  });
+
+  await receivingButton.click({
+    force: true,
+    timeout: 15000,
   });
 
   await page.waitForTimeout(1000);
 
-  await page.getByRole("button", { name: "Select currency" }).nth(1).click({
-    timeout: 15000,
-  });
+  let ghsSelected = false;
 
-  await page.getByRole("option", { name: /Ghanaian Cedi GHS/i }).click({
-    timeout: 15000,
-  });
+  const ghsCandidates = [
+    page.getByRole("option", {
+      name: /Ghanaian Cedi\s+GHS/i,
+    }),
 
-  await page.waitForTimeout(4000);
+    page.getByRole("option", {
+      name: /Ghanaian Cedi GHS Ghanaian/i,
+    }),
 
-  let rateText = "";
-  const rateLocator = page.getByText(/GBP\s*≈\s*[0-9.]+\s*GHS/i).first();
+    page.locator('[role="option"]:visible').filter({
+      hasText: /\bGHS\b/,
+    }),
 
-  if (await rateLocator.count()) {
-    rateText = await rateLocator.innerText().catch(() => "");
+    page.getByText("GHS", {
+      exact: true,
+    }),
+  ];
+
+  for (const locator of ghsCandidates) {
+    try {
+      const count = await locator.count();
+
+      for (let index = 0; index < count; index++) {
+        const candidate = locator.nth(index);
+
+        if (
+          await candidate
+            .isVisible({ timeout: 2000 })
+            .catch(() => false)
+        ) {
+          await candidate.click({
+            force: true,
+            timeout: 8000,
+          });
+
+          ghsSelected = true;
+          break;
+        }
+      }
+
+      if (ghsSelected) break;
+    } catch (_) {}
   }
 
-  const bodyText = `${rateText}\n${await page.locator("body").innerText()}`;
-  saveDebugText(source.provider, bodyText);
+  if (!ghsSelected) {
+    await page.keyboard.type("GHS", {
+      delay: 100,
+    });
+
+    await page.waitForTimeout(800);
+
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+
+    ghsSelected = true;
+  }
+
+  await page.waitForTimeout(5000);
+
+  /*
+   * Read the rate instead of clicking it.
+   */
+  const directRateText = await page
+    .getByText(
+      /GBP\s*≈\s*[0-9]+(?:\.[0-9]+)?\s*GHS/i
+    )
+    .first()
+    .innerText()
+    .catch(() => "");
+
+  const bodyText = await page
+    .locator("body")
+    .innerText()
+    .catch(() => "");
+
+  const combinedText =
+    `${directRateText}\n${bodyText}`;
+
+  saveDebugText(
+    source.provider,
+    combinedText
+  );
 
   let rate = null;
 
   const patterns = [
-    /GBP\s*≈\s*([0-9.]+)\s*GHS/i,
-    /GBP\s*=\s*([0-9.]+)\s*GHS/i,
-    /1\s*GBP\s*[≈=]\s*([0-9.]+)\s*GHS/i,
+    /GBP\s*≈\s*([0-9]+(?:\.[0-9]+)?)\s*GHS/i,
+    /1\s*GBP\s*≈\s*([0-9]+(?:\.[0-9]+)?)\s*GHS/i,
+    /GBP\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*GHS/i,
   ];
 
-  for (const regex of patterns) {
-    const match = bodyText.match(regex);
+  for (const pattern of patterns) {
+    const match = combinedText.match(pattern);
+
     if (!match) continue;
 
-    const candidate = parseLocaleNumber(match[1]);
-    if (candidate && candidate >= 10 && candidate <= 25) {
-      rate = Number(candidate.toFixed(6));
+    const candidate = parseLocaleNumber(
+      match[1]
+    );
+
+    if (
+      candidate &&
+      candidate >= 10 &&
+      candidate <= 25
+    ) {
+      rate = Number(
+        candidate.toFixed(6)
+      );
+
       break;
     }
   }
 
   if (!rate) {
-    const file = await saveScreenshot(page, source.provider);
-    throw new Error(`Could not extract Nala rate. Screenshot: ${file}`);
+    const file = await saveScreenshot(
+      page,
+      source.provider
+    );
+
+    throw new Error(
+      `Could not extract Nala GBP/GHS rate. ` +
+      `Captured text: ${combinedText
+        .replace(/\s+/g, " ")
+        .slice(0, 400)}. ` +
+      `Screenshot: ${file}`
+    );
   }
 
-  return buildResult(source, rate, 0, rate, {
-    quoted_send_amount: 1000,
-  });
+  console.log(
+    `Nala extracted rate: ${rate}`
+  );
+
+  return buildResult(
+    source,
+    rate,
+    0,
+    rate,
+    {
+      verified_method:
+        "nala_live_gbp_ghs_rate",
+    }
+  );
 }
 
 async function handleRozeRemit(page, source) {
